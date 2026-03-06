@@ -1,27 +1,39 @@
 from common.path_config import PROJECT_ROOT
 
+import os
 import pygame
 from pygame.locals import *
 from enum import IntEnum, unique
 
 @unique
 class JoystickButton(IntEnum):
-    # Standard PlayStation/Xbox Layout
-    A = 0      # PS: Cross(×), Xbox: A
-    B = 1      # PS: Circle(○), Xbox: B
-    X = 2      # PS: Square(□), Xbox: X
-    Y = 3      # PS: Triangle(△), Xbox: Y
-    L1 = 4     # Left Bumper (L1 on PS)
-    R1 = 5     # Right Bumper (R1 on PS)
-    SELECT = 6   # Select/Share button
-    START = 7  # Start/Options button
-    L3 = 8     # Left Stick Press
-    R3 = 9     # Right Stick Press
-    HOME = 10  # PS: PS FSMCommand, Xbox: Xbox FSMCommand
-    UP = 11    # D-pad Up (if mapped as separate button)
-    DOWN = 12  # D-pad Down
-    LEFT = 13  # D-pad Left
-    RIGHT = 14 # D-pad Right
+    # Xbox One/Series controller on Linux (xpad driver)
+    # Override any button with env var JOYSTICK_<NAME>, e.g. JOYSTICK_START=7
+    A = 0
+    B = 1
+    X = 3
+    Y = 4
+    L1 = 6      # LB
+    R1 = 7      # RB
+    SELECT = 10  # View/Back button
+    START = 11   # Menu/Start button
+    L3 = 13     # Left Stick Press
+    R3 = 14     # Right Stick Press
+    HOME = 15   # Xbox Guide button
+    UP = 16     # D-pad Up
+    DOWN = 17   # D-pad Down
+    LEFT = 18   # D-pad Left
+    RIGHT = 19  # D-pad Right
+
+
+def _default_remap():
+    """Logical button -> physical index. Override with env vars, e.g. JOYSTICK_START=7."""
+    remap = {}
+    for btn in JoystickButton:
+        val = os.environ.get(f"JOYSTICK_{btn.name}")
+        if val is not None:
+            remap[btn] = int(val)
+    return remap
 
 class JoyStick:
     def __init__(self):
@@ -45,8 +57,13 @@ class JoyStick:
         
         self.hat_count = self.joystick.get_numhats()
         self.hat_states = [(0, 0)] * self.hat_count
-        
-        
+
+        self.remap = _default_remap()
+
+    def _physical_id(self, button_id):
+        """Map logical button to physical index (for alternate controller layouts)."""
+        return self.remap.get(button_id, button_id)
+
     def update(self):
         """update joystick state"""
         pygame.event.pump()  
@@ -67,14 +84,16 @@ class JoyStick:
 
     def is_button_pressed(self, button_id):
         """detect button pressed"""
-        if 0 <= button_id < self.button_count:
-            return self.button_states[button_id]
+        phys = self._physical_id(button_id)
+        if 0 <= phys < self.button_count:
+            return self.button_states[phys]
         return False
 
     def is_button_released(self, button_id):
         """detect button released"""
-        if 0 <= button_id < self.button_count:
-            return self.button_released[button_id]
+        phys = self._physical_id(button_id)
+        if 0 <= phys < self.button_count:
+            return self.button_released[phys]
         return False
 
     def get_axis_value(self, axis_id):

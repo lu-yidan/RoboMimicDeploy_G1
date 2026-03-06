@@ -37,6 +37,7 @@ cd RoboMimic_Deploy
 pip install numpy==1.20.0
 pip install onnx onnxruntime
 pip install hydra-core
+pip install mujoco pygame
 ```
 
 #### 2.2.3 安装unitree_sdk2_python
@@ -73,7 +74,33 @@ python deploy_mujoco/deploy_mujoco.py
 
 ## 3. 仿真操作说明
 
+> **注意**：手柄映射（`common/joystick.py`）**仅用于 Mujoco 仿真**。真机部署（`deploy_real`）使用宇树 SDK 的 `RemoteController`，走底层数据包通信，与 joystick.py 无关。
+
 1. 连接Xbox手柄
+
+   **Xbox 按键对应**：文档中的 Start = 右侧「三条横线」Menu 键； Back / Select = 左侧「两个小方块/叠在一起的窗口」键; R1 = 右肩键 RB；L1 = 左肩键 LB；A/B/X/Y 与手柄正面一致。
+
+   代码默认映射已针对 **Xbox One / Series X|S 在 Linux（xpad 驱动）** 下调整。若你使用其他手柄，或出现「单独按 R1 却进入位控」等按键错位，可按以下步骤修正：
+
+   - 先确认每个键的实际索引，在项目根目录运行：
+     ```bash
+     python tools/joystick_test.py
+     ```
+     依次按下各键，记下终端打印的 **Button index**。
+
+   - 然后按实测索引修改 `common/joystick.py` 中 `JoystickButton` 枚举的对应值，例如：
+     ```python
+     class JoystickButton(IntEnum):
+         A = 0
+         B = 1
+         X = 2      # 改为你手柄实际报告的索引
+         Y = 3
+         L1 = 4
+         R1 = 5
+         SELECT = 6
+         START = 7
+         ...
+     ```
 
 2. 运行仿真程序：
 
