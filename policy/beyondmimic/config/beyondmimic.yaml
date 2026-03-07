@@ -1,5 +1,5 @@
-onnx_path:   "policy_zuiwu_48000.onnx"   # 154-dim policy (Wo-State-Estimation)
-motion_path: "dance_zui.npz"             # NPZ motion file (dance, ~11384 frames @ 50fps)
+onnx_path:   "policy-kick_4000.onnx"   # 154-dim policy (Wo-State-Estimation)
+motion_path: "kick-new.npz"             # NPZ motion file (dance, ~11384 frames @ 50fps)
 
 control_dt:      0.02     # 50 Hz control (sim: 3ms * 7 decimation)
 warmup_steps:    30       # interpolation steps from current pose to motion t=0 (0.6 sec)
