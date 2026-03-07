@@ -17,6 +17,7 @@ class FSMStateName(Enum):
     SKILL_KungFu2 = 9
     SKILL_ASAP = 10
     STANDMODE = 11
+    SKILL_BEYONDMIMIC = 12
 
 @unique
 class FSMCommand(Enum):
@@ -30,6 +31,7 @@ class FSMCommand(Enum):
     SKILL_4 = 8
     SKILL_5 = 10
     STAND_UP = 11
+    SKILL_6 = 12
     
     
     

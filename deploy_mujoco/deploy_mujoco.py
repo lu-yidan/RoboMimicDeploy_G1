@@ -19,6 +19,16 @@ import hydra
 
 
 
+def quat_to_matrix(q):
+    """Convert quaternion [w, x, y, z] to 3x3 rotation matrix."""
+    w, x, y, z = q
+    return np.array([
+        [1 - 2*(y*y + z*z),  2*(x*y - w*z),  2*(x*z + w*y)],
+        [2*(x*y + w*z),  1 - 2*(x*x + z*z),  2*(y*z - w*x)],
+        [2*(x*z - w*y),      2*(y*z + w*x),  1 - 2*(x*x + y*y)],
+    ])
+
+
 def pd_control(target_q, q, kp, target_dq, dq, kd):
     """Calculates torques from position commands"""
     return (target_q - q) * kp + (target_dq - dq) * kd
@@ -33,6 +43,7 @@ def main(cfg: DictConfig):
     m = mujoco.MjModel.from_xml_path(xml_path)
     d = mujoco.MjData(m)
     m.opt.timestep = simulation_dt
+    torso_body_id = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "torso_link")
     mj_per_step_duration = simulation_dt * control_decimation
     num_joints = m.nu
     print(f"num_joints: {num_joints}")
@@ -75,7 +86,9 @@ def main(cfg: DictConfig):
                     state_cmd.skill_cmd = FSMCommand.SKILL_4
                 elif joystick.is_button_released(JoystickButton.A) and joystick.is_button_pressed(JoystickButton.L1):     # asap, L1+A
                     state_cmd.skill_cmd = FSMCommand.SKILL_5
-                
+                elif joystick.is_button_released(JoystickButton.B) and joystick.is_button_pressed(JoystickButton.L1):   # BeyondMimic, L1+B
+                    state_cmd.skill_cmd = FSMCommand.SKILL_6
+
                 state_cmd.vel_cmd[0] = -joystick.get_axis_value(1)  # left stick Y: forward/backward
                 state_cmd.vel_cmd[1] = -joystick.get_axis_value(0)  # left stick X: strafe
                 state_cmd.vel_cmd[2] = -joystick.get_axis_value(2)  # right stick X: yaw
@@ -100,7 +113,14 @@ def main(cfg: DictConfig):
                     state_cmd.dq = dqj.copy()
                     state_cmd.gravity_ori = gravity_orientation.copy()
                     state_cmd.ang_vel = omega.copy()
-                    
+
+                    # Extra state for BeyondMimic policy
+                    R_root = quat_to_matrix(quat)
+                    state_cmd.root_lin_vel_b = (R_root.T @ d.qvel[0:3]).astype(np.float32)
+                    state_cmd.root_ang_vel_b = d.qvel[3:6].astype(np.float32)  # body frame in MuJoCo
+                    state_cmd.torso_pos_w  = d.xpos[torso_body_id].astype(np.float32)
+                    state_cmd.torso_quat_w = d.xquat[torso_body_id].astype(np.float32)  # [w,x,y,z]
+
                     FSM_controller.run()
                     policy_output_action = policy_output.actions.copy()
                     kps = policy_output.kps.copy()

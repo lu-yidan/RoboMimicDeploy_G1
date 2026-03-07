@@ -7,6 +7,7 @@ from policy.kungfu.KungFu import KungFu
 from policy.dance.Dance import Dance
 from policy.asap.asap import ASAP
 from policy.host.host import HOST
+from policy.beyondmimic.BeyondMimic import BeyondMimic
 from policy.skill_cooldown.SkillCooldown import SkillCooldown
 from policy.skill_cast.SkillCast import SkillCast
 from policy.kick.Kick import Kick
@@ -41,7 +42,8 @@ class FSM:
         self.kungfu2_policy = KungFu2(state_cmd, policy_output)
         self.asap_policy = ASAP(state_cmd, policy_output)
         self.host_policy = HOST(state_cmd, policy_output)
-        
+        self.beyondmimic_policy = BeyondMimic(state_cmd, policy_output)
+
         print("initalized all policies!!!")
         
         self.cur_policy = self.passive_mode             # 当前policy
@@ -104,6 +106,8 @@ class FSM:
             self.cur_policy = self.asap_policy
         elif((policy_name == FSMStateName.STANDMODE)):
             self.cur_policy = self.host_policy
+        elif((policy_name == FSMStateName.SKILL_BEYONDMIMIC)):
+            self.cur_policy = self.beyondmimic_policy
         else:
             pass
             

@@ -120,6 +120,8 @@ class LocoMode(FSMState):
             return FSMStateName.SKILL_KungFu2
         elif(self.state_cmd.skill_cmd == FSMCommand.SKILL_5):
             return FSMStateName.SKILL_ASAP
+        elif(self.state_cmd.skill_cmd == FSMCommand.SKILL_6):
+            return FSMStateName.SKILL_BEYONDMIMIC
         elif(self.state_cmd.skill_cmd == FSMCommand.PASSIVE):
             return FSMStateName.PASSIVE
         else:

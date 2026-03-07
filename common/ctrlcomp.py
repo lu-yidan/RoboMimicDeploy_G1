@@ -14,6 +14,11 @@ class StateAndCmd:
         self.tau_est = np.zeros(num_joints, dtype=np.float32)
         self.gravity_ori = np.array([0., 0., 1.])
         self.ang_vel = np.zeros(3)
+        # body-frame velocities for BeyondMimic (filled in deploy_mujoco)
+        self.root_lin_vel_b = np.zeros(3, dtype=np.float32)
+        self.root_ang_vel_b = np.zeros(3, dtype=np.float32)
+        self.torso_pos_w  = np.zeros(3, dtype=np.float32)
+        self.torso_quat_w = np.array([1., 0., 0., 0.], dtype=np.float32)  # [w,x,y,z]
         # joy cmd
         self.vel_cmd = np.zeros(3)
         self.skill_cmd = FSMCommand.INVALID
