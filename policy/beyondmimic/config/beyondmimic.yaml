@@ -1,9 +1,12 @@
-onnx_path:   "policy-kick_4000.onnx"   # 154-dim policy (Wo-State-Estimation)
+onnx_path:   "policy_kick-new_4000.onnx"   # 154-dim policy (Wo-State-Estimation)
 motion_path: "kick-new.npz"             # NPZ motion file (dance, ~11384 frames @ 50fps)
 
+# onnx_path:   "policy_fallAndGetUp2_subject2_4000.onnx"   # 154-dim policy (Wo-State-Estimation)
+# motion_path: "fallAndGetUp2_subject2.npz"             # NPZ motion file (dance, ~11384 frames @ 50fps)
+
 control_dt:      0.02     # 50 Hz control (sim: 3ms * 7 decimation)
-warmup_steps:    30       # interpolation steps from current pose to motion t=0 (0.6 sec)
-clip_actions:    3.0      # PPO actions rarely exceed ±3; prevents runaway divergence
+warmup_steps:    10       # interpolation steps from current pose to motion t=0 (0.6 sec)
+clip_actions:    10.0      # PPO actions rarely exceed ±3; prevents runaway divergence
 
 # All arrays below are in MuJoCo joint order:
 #   [l_hip_p, l_hip_r, l_hip_y, l_knee, l_ank_p, l_ank_r,
