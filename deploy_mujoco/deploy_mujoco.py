@@ -88,10 +88,10 @@ def main(cfg: DictConfig):
                     state_cmd.skill_cmd = FSMCommand.SKILL_5
                 elif joystick.is_button_released(JoystickButton.B) and joystick.is_button_pressed(JoystickButton.L1):   # BeyondMimic, L1+B
                     state_cmd.skill_cmd = FSMCommand.SKILL_6
-
-                state_cmd.vel_cmd[0] = -joystick.get_axis_value(1)  # left stick Y: forward/backward
-                state_cmd.vel_cmd[1] = -joystick.get_axis_value(0)  # left stick X: strafe
-                state_cmd.vel_cmd[2] = -joystick.get_axis_value(2)  # right stick X: yaw
+                    
+                state_cmd.vel_cmd[0] = -joystick.get_axis_value(1)
+                state_cmd.vel_cmd[1] = -joystick.get_axis_value(0)
+                state_cmd.vel_cmd[2] = -joystick.get_axis_value(3)
                 
                 step_start = time.time()
                 
