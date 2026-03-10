@@ -57,6 +57,7 @@ def main(cfg: DictConfig):
     FSM_controller = FSM(state_cmd, policy_output)
     
     joystick = JoyStick()
+    prev_hat = (0, 0)
     Running = True
     with mujoco.viewer.launch_passive(m, d) as viewer:
         sim_start_time = time.time()
@@ -66,6 +67,8 @@ def main(cfg: DictConfig):
                     Running = False
 
                 joystick.update()
+                hat = joystick.get_hat_direction()
+                hat_just_pressed = lambda hx, hy: (hat == (hx, hy) and prev_hat != (hx, hy))
                 if joystick.is_button_released(JoystickButton.L1) and joystick.is_button_pressed(JoystickButton.R1):
                     state_cmd.skill_cmd = FSMCommand.PASSIVE
                 if joystick.is_button_released(JoystickButton.START):
@@ -88,7 +91,10 @@ def main(cfg: DictConfig):
                     state_cmd.skill_cmd = FSMCommand.SKILL_5
                 elif joystick.is_button_released(JoystickButton.B) and joystick.is_button_pressed(JoystickButton.L1):   # BeyondMimic, L1+B
                     state_cmd.skill_cmd = FSMCommand.SKILL_6
-                    
+                elif hat_just_pressed(0, 1) and joystick.is_button_pressed(JoystickButton.R1):   # BeyondMimicMJ, R1+D-pad UP
+                    state_cmd.skill_cmd = FSMCommand.SKILL_7
+
+                prev_hat = hat
                 state_cmd.vel_cmd[0] = -joystick.get_axis_value(1)
                 state_cmd.vel_cmd[1] = -joystick.get_axis_value(0)
                 state_cmd.vel_cmd[2] = -joystick.get_axis_value(3)

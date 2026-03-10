@@ -18,6 +18,7 @@ class FSMStateName(Enum):
     SKILL_ASAP = 10
     STANDMODE = 11
     SKILL_BEYONDMIMIC = 12
+    SKILL_BEYONDMIMIC_MJ = 13
 
 @unique
 class FSMCommand(Enum):
@@ -32,9 +33,10 @@ class FSMCommand(Enum):
     SKILL_5 = 10
     STAND_UP = 11
     SKILL_6 = 12
-    
-    
-    
+    SKILL_7 = 13
+
+
+
 
 def get_gravity_orientation(quaternion):
     qw, qx, qy, qz = quaternion
