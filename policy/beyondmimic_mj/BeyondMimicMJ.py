@@ -127,15 +127,30 @@ class BeyondMimicMJ(FSMState):
         with open(config_path, "r") as f:
             cfg = yaml.load(f, Loader=yaml.FullLoader)
 
-        onnx_path   = os.path.join(current_dir, "model", cfg["onnx_path"])
-        motion_path = os.path.join(current_dir, "model", cfg["motion_path"])
+        onnx_path        = os.path.join(current_dir, "model", cfg["onnx_path"])
+        motion_path      = os.path.join(current_dir, "model", cfg["motion_path"])
+        self.control_dt  = float(cfg["control_dt"])   # needed before motion slicing
 
         # ---- Load motion from NPZ (all arrays in MuJoCo DFS order) ----
         motion = np.load(motion_path)
-        self.motion_joint_pos = motion["joint_pos"]   # [T, 29]  MuJoCo order
-        self.motion_joint_vel = motion["joint_vel"]   # [T, 29]  MuJoCo order
-        self.motion_body_quat = motion["body_quat_w"] # [T, 30, 4]  [w,x,y,z]
+        joint_pos_full = motion["joint_pos"]   # [T, 29]  MuJoCo order
+        joint_vel_full = motion["joint_vel"]   # [T, 29]  MuJoCo order
+        body_quat_full = motion["body_quat_w"] # [T, 30, 4]  [w,x,y,z]
+        T_full = joint_pos_full.shape[0]
+
+        # Optional time window: motion_start_s / motion_end_s in seconds
+        start_s = float(cfg.get("motion_start_s", 0.0))
+        end_s   = cfg.get("motion_end_s", None)
+        i0 = int(round(start_s / self.control_dt))
+        i1 = int(round(float(end_s) / self.control_dt)) if end_s is not None else T_full
+        i0 = max(0, min(i0, T_full))
+        i1 = max(i0 + 1, min(i1, T_full))
+        self.motion_joint_pos = joint_pos_full[i0:i1]
+        self.motion_joint_vel = joint_vel_full[i0:i1]
+        self.motion_body_quat = body_quat_full[i0:i1]
         self.motion_total_steps = self.motion_joint_pos.shape[0]
+        print(f"BeyondMimicMJ motion window: {i0 * self.control_dt:.2f}s ~ "
+              f"{i1 * self.control_dt:.2f}s  ({self.motion_total_steps} frames)")
 
         # ---- Config (all arrays in MuJoCo order, directly from ONNX metadata) ----
         self.kps          = np.array(cfg["kps"],               dtype=np.float32)
@@ -144,7 +159,7 @@ class BeyondMimicMJ(FSMState):
         self.default_q    = np.array(cfg["default_joint_pos"], dtype=np.float32)
         self.action_scale = np.array(cfg["action_scale"],      dtype=np.float32)
         self.clip_actions = float(cfg.get("clip_actions", 3.0))
-        self.control_dt   = float(cfg["control_dt"])
+        # self.control_dt already set above (needed for motion slicing)
         self.WARMUP_STEPS = int(cfg.get("warmup_steps", 30))
 
         # ---- ONNX session ----
