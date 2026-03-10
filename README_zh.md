@@ -71,6 +71,8 @@ python deploy_mujoco/deploy_mujoco.py
 | **Kick**          | 拿来凑数的动作                              |
 | **SkillCast**     | 下肢+腰部稳定站立，上肢位控至特定关节角，一般在执行Mimic策略前执行 |
 | **SkillCooldown** | 下肢+腰部持续平衡，上肢恢复至默认关节角，一般在执行Mimic策略后执行 |
+| **BeyondMimic**   | 运动模仿策略（Isaac Lab训练，BFS关节顺序）                |
+| **BeyondMimicMJ** | 运动模仿策略（mjlab训练，MuJoCo DFS关节顺序，无需重排列）       |
 
 ## 3. 仿真操作说明
 
@@ -78,7 +80,7 @@ python deploy_mujoco/deploy_mujoco.py
 
 1. 连接Xbox手柄
 
-   **Xbox 按键对应**：文档中的 Start = 右侧「三条横线」Menu 键； Back / Select = 左侧「两个小方块/叠在一起的窗口」键; R1 = 右肩键 RB；L1 = 左肩键 LB；A/B/X/Y 与手柄正面一致。
+   **Xbox 按键对应**：文档中的 Start = 右侧「三条横线」Menu 键； Back / Select = 左侧「两个小方块/叠在一起的窗口」键; R1 = 右肩键 RB；L1 = 左肩键 LB；A/B/X/Y 与手柄正面一致。Xbox 手柄在 Linux 上 D-pad 为 hat switch，代码通过 `get_hat_direction()` 读取，与普通按键不同。
 
    代码默认映射已针对 **Xbox One / Series X|S 在 Linux（xpad 驱动）** 下调整。若你使用其他手柄，或出现「单独按 R1 却进入位控」等按键错位，可按以下步骤修正：
 
@@ -131,6 +133,10 @@ python deploy_mujoco/deploy_mujoco.py xml_path=g1_description/g1_29dof_LieDown.x
 
 10. 在LocoMode模式下，按 L1+A 让机器人表演ASAP跳跃动作，**只推荐在仿真中使用**
 
+11. 在LocoMode模式下，按 L1+B 触发 BeyondMimic 运动模仿策略（Isaac Lab训练版本）
+
+12. 在LocoMode模式下，按 R1+D-pad UP 触发 BeyondMimicMJ 运动模仿策略（mjlab训练版本）
+
 ## 4. 真机操作说明
 
 1. 开机后将机器人吊起来
@@ -145,7 +151,11 @@ python deploy_real/deploy_real.py
 
 4. 当机器人从平躺状态开始时，需要先按 L1+X 进入站立状态， 再按 R1+A 进入 LocoMode
 
-5. 其他动作操作与仿真中一致
+5. 在LocoMode模式下，按 L1+B 触发 BeyondMimic 运动模仿策略
+
+6. 在LocoMode模式下，按 R1+Up（D-pad 上键）触发 BeyondMimicMJ 运动模仿策略
+
+7. 其他动作操作与仿真中一致
 
 ## 注意事项
 
