@@ -285,7 +285,7 @@ class Score(FSMState):
         robot_pelvis_pos_w = self.state_cmd.pelvis_pos_w.astype(np.float64)
         R_pelvis = _quat_to_matrix(self.state_cmd.pelvis_quat_w.astype(np.float64))
         ball_rel_w   = self.state_cmd.ball_pos_w.astype(np.float64) - robot_pelvis_pos_w
-        target_rel_w = self.state_cmd.target_pos_w.astype(np.float64) - robot_pelvis_pos_w
+        target_rel_w = self.target_pos_w.astype(np.float64) - robot_pelvis_pos_w
         ball_pos_b   = np.clip(R_pelvis.T @ ball_rel_w,   -8.0, 8.0).astype(np.float32)
         target_pos_b = np.clip(R_pelvis.T @ target_rel_w, -8.0, 8.0).astype(np.float32)
 
@@ -343,12 +343,12 @@ class Score(FSMState):
         target_q   = self.default_q_mj + self.action_scale_mj * actions_mj
 
         # Debug: print for first 3 policy steps
-        if policy_step < 3:
+        if policy_step < 30:
             print(f"\n[Score policy_step={policy_step}]")
             print(f"  anchor_pos_b  : {obs[58:61]}")
             print(f"  anchor_ori_6d : {obs[61:67]}")
-            print(f"  ball_pos_b    : {obs[532:535]}")
-            print(f"  target_pos_b  : {obs[547-3:547]}")
+            print(f"  ball_pos_b    : {obs[529:532]}")   # newest frame of ball_hist   [517:532]
+            print(f"  target_pos_b  : {obs[544:547]}")   # newest frame of target_hist [532:547]
             print(f"  actions_il    : min={actions_il.min():.3f}  max={actions_il.max():.3f}")
 
         self.policy_output.actions = target_q

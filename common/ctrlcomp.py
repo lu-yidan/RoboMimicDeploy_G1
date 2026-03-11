@@ -22,10 +22,10 @@ class StateAndCmd:
         # pelvis (floating base) state for Score controller (world frame, filled in deploy_mujoco)
         self.pelvis_pos_w  = np.zeros(3, dtype=np.float32)
         self.pelvis_quat_w = np.array([1., 0., 0., 0.], dtype=np.float32)  # [w,x,y,z]
-        # ball and target state for Score controller (world frame, filled in deploy_mujoco)
+        # ball state for Score controller (world frame, filled in deploy_mujoco)
         self.ball_pos_w    = np.zeros(3, dtype=np.float32)
         self.ball_vel_w    = np.zeros(3, dtype=np.float32)
-        self.target_pos_w  = np.zeros(3, dtype=np.float32)
+        # note: target_pos_w lives in Score.__init__ (loaded from score.yaml), not here
         # joy cmd
         self.vel_cmd = np.zeros(3)
         self.skill_cmd = FSMCommand.INVALID

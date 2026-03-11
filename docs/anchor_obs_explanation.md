@@ -10,12 +10,17 @@ Score 策略的目标是让机器人**模仿参考动作的同时把球踢向目
 **"你的 torso（上半身根节点）当前相对于参考动作，差在哪里、差多少"**。
 
 这个"差"就是 anchor 观测：
-- **anchor_pos_b**（3维）：参考 torso 的位置，在机器人 body 坐标系里的坐标
-- **anchor_ori_b**（6维）：参考 torso 的朝向，相对于机器人当前朝向的差值，用 6D rotation 表示
+- **anchor_pos_b**（3维）：参考 torso 的位置，在机器人 torso body 坐标系里的坐标
+- **anchor_ori_b**（6维）：参考 torso 的朝向，相对于机器人当前 torso 朝向的差值，用 6D rotation 表示
 
 选 **torso_link** 而非 pelvis 作锚点，是因为训练配置中明确设定了
 `anchor_body_name = "torso_link"`。Pelvis 是浮动基座，腰部三关节（waist_yaw/roll/pitch）
 弯曲时 pelvis 不动，但上半身已经大幅偏移；torso 在腰部以上，更能代表上半身整体的空间状态。
+
+> **注意**：anchor obs（anchor_pos_b / anchor_ori_b）基于 **torso**；
+> 而球和目标点的 obs（soccer_pos_b / target_pos_b）基于 **pelvis（root）**，
+> 这与训练代码 `soccer_robot_relative_pos_b` / `target_robot_relative_pos_b`
+> 使用 `root_state_w` 保持一致。两者不同，不要混淆。
 
 ---
 
@@ -28,12 +33,15 @@ Motion World Frame（动作世界系）
 
 Robot World Frame（机器人世界系）
     MuJoCo 仿真当前的世界坐标系。
-    d.xpos[torso_id] 和 d.xquat[torso_id] 都在这个系里。
+    d.xpos[torso_id]、d.xquat[torso_id]、d.qpos[0:3]（pelvis）都在这个系里。
 
-Robot Body Frame（机器人 body 系）
-    以机器人当前 torso_link 为原点，随机器人朝向旋转的局部坐标系。
-    机器人"正前方"在这个系里永远是 +X，"左方"永远是 +Y，"上方"永远是 +Z。
-    Policy 接收的 anchor 观测就在这个系里表达。
+Torso Body Frame（torso body 系）
+    以机器人当前 torso_link 为原点，随 torso 旋转的局部坐标系。
+    anchor_pos_b / anchor_ori_b 在这个系里表达。
+
+Pelvis Body Frame（pelvis body 系）
+    以机器人当前 pelvis（浮动基座）为原点，随 pelvis 旋转的局部坐标系。
+    soccer_pos_b / target_pos_b 在这个系里表达。
 ```
 
 两个世界系的**地面（XY 平面）相同**，区别只在水平旋转方向（yaw）：
@@ -47,10 +55,10 @@ Robot Body Frame（机器人 body 系）
 
 ```python
 motion_t0_quat = self.motion_body_quat[0, NPZ_ANCHOR_IDX]   # 动作第0帧，torso 的朝向
-robot_quat     = self.state_cmd.torso_quat_w                 # 机器人入场时 torso 的朝向
+torso_quat_w   = self.state_cmd.torso_quat_w                 # 机器人入场时 torso 的朝向
 
 yaw_motion_mat = _quat_to_matrix(_yaw_quat(motion_t0_quat))  # 只取 yaw 分量 → 3×3
-yaw_robot_mat  = _quat_to_matrix(_yaw_quat(robot_quat))       # 只取 yaw 分量 → 3×3
+yaw_robot_mat  = _quat_to_matrix(_yaw_quat(torso_quat_w))    # 只取 yaw 分量 → 3×3
 
 self._init_to_world = yaw_robot_mat @ yaw_motion_mat.T
 ```
@@ -90,10 +98,15 @@ _init_to_world = yaw_robot_mat @ I.T = yaw_robot_mat
 ## 二、`motion_anchor_pos_b` 的计算
 
 ```python
+# anchor obs 使用 torso 作为参考 body（训练配置：anchor_body_name = "torso_link"）
+torso_quat_w = self.state_cmd.torso_quat_w.astype(np.float64)
+R_torso_w    = _quat_to_matrix(torso_quat_w)
+torso_pos_w  = self.state_cmd.torso_pos_w.astype(np.float64)
+
+init_world_quat      = _matrix_to_quat(self._init_to_world)
 ref_anchor_pos_w     = self.motion_body_pos[t, NPZ_ANCHOR_IDX]
 aligned_anchor_pos_w = self._init_to_world @ ref_anchor_pos_w
-robot_torso_pos_w    = self.state_cmd.torso_pos_w
-anchor_pos_b = R_robot.T @ (aligned_anchor_pos_w - robot_torso_pos_w)
+anchor_pos_b = R_torso_w.T @ (aligned_anchor_pos_w - torso_pos_w)
 ```
 
 ### 三步拆解
@@ -102,11 +115,11 @@ anchor_pos_b = R_robot.T @ (aligned_anchor_pos_w - robot_torso_pos_w)
 ① self._init_to_world @ ref_anchor_pos_w
    动作世界系坐标 → 机器人世界系坐标（yaw 对齐）
 
-② - robot_torso_pos_w
+② - torso_pos_w
    以机器人当前 torso 为原点，得到世界系下的相对坐标
 
-③ R_robot.T @ (...)
-   把世界坐标轴方向的相对坐标，旋转到机器人 body 坐标轴方向
+③ R_torso_w.T @ (...)
+   把世界坐标轴方向的相对坐标，旋转到 torso body 坐标轴方向
 ```
 
 ### 具体数值例子
@@ -114,13 +127,13 @@ anchor_pos_b = R_robot.T @ (aligned_anchor_pos_w - robot_torso_pos_w)
 场景设定（延续上面的例子）：
 - 动作世界系与机器人世界系的 yaw 差 90°，`_init_to_world` 如上
 - 参考动作第 t 帧，torso 在动作世界系的位置：`ref_anchor_pos_w = [2.0, 0.5, 0.9]`
-- 机器人当前 torso 在机器人世界系的位置：`robot_torso_pos_w = [1.0, 0.0, 0.85]`
+- 机器人当前 torso 在机器人世界系的位置：`torso_pos_w = [1.0, 0.0, 0.85]`
 - 机器人当前朝向正北，torso 没有 pitch/roll 倾斜：
 
 ```
-R_robot = [[0, -1, 0],   （机器人"前方"+X_body 对应世界系的正北 [0,1,0]）
-           [1,  0, 0],
-           [0,  0, 1]]
+R_torso_w = [[0, -1, 0],   （torso "前方"+X_body 对应世界系的正北 [0,1,0]）
+             [1,  0, 0],
+             [0,  0, 1]]
 ```
 
 **步骤①：yaw 对齐**
@@ -136,22 +149,22 @@ aligned_anchor_pos_w = _init_to_world @ [2.0, 0.5, 0.9]
 **步骤②：以机器人 torso 为原点**
 
 ```
-delta_w = aligned_anchor_pos_w - robot_torso_pos_w
+delta_w = aligned_anchor_pos_w - torso_pos_w
         = [-0.5, 2.0, 0.9] - [1.0, 0.0, 0.85]
         = [-1.5, 2.0, 0.05]
 ```
 
 参考 torso 在机器人世界系中：向西 1.5m、向北 2m、高 5cm。
 
-**步骤③：转到 body 坐标系**
+**步骤③：转到 torso body 坐标系**
 
 ```
-anchor_pos_b = R_robot.T @ [-1.5, 2.0, 0.05]
+anchor_pos_b = R_torso_w.T @ [-1.5, 2.0, 0.05]
              = [[0,1,0],[-1,0,0],[0,0,1]] @ [-1.5, 2.0, 0.05]
              = [2.0, 1.5, 0.05]
 ```
 
-在机器人 body 系里：**正前方 2m、左侧 1.5m、上方 5cm**。
+在 torso body 系里：**正前方 2m、左侧 1.5m、上方 5cm**。
 
 Policy 拿到 `[2.0, 1.5, 0.05]` 后，能直接理解：
 "参考 torso 在我正前方 2 米偏左的位置，比我高一点点"，不需要知道自己朝哪个世界方向。
@@ -161,19 +174,18 @@ Policy 拿到 `[2.0, 1.5, 0.05]` 后，能直接理解：
 如果只做步骤①②，`delta_w = [-1.5, 2.0, 0.05]` 的含义随机器人朝向而变。
 当机器人转身面向正东后，同样的"参考 torso 在机器人正前方"，`delta_w` 的数值就会变成 `[2.0, 1.5, 0.05]`。
 Policy 看到的输入数值不同，但物理含义相同，训练和推理会混乱。
-乘以 `R_robot.T` 后，无论机器人朝哪，"正前方 2m"永远输出 `[2.0, 0, 0]`，Policy 感知稳定。
+乘以 `R_torso_w.T` 后，无论机器人朝哪，"正前方 2m"永远输出 `[2.0, 0, 0]`，Policy 感知稳定。
 
 ---
 
 ## 三、`motion_anchor_ori_b` 的计算
 
 ```python
-init_world_quat  = _matrix_to_quat(self._init_to_world)
-ref_anchor_quat  = self.motion_body_quat[t, NPZ_ANCHOR_IDX]
-aligned_quat     = _quat_mul(init_world_quat, ref_anchor_quat)
-rel_quat         = _quat_mul(_quat_conj(robot_quat), aligned_quat)
-rel_quat         = rel_quat / np.linalg.norm(rel_quat)
-anchor_ori_6d    = _rot6d_from_quat(rel_quat)
+ref_anchor_quat_w = self.motion_body_quat[t, NPZ_ANCHOR_IDX]
+aligned_quat      = _quat_mul(init_world_quat, ref_anchor_quat_w)
+rel_quat          = _quat_mul(_quat_conj(torso_quat_w), aligned_quat)
+rel_quat          = rel_quat / np.linalg.norm(rel_quat)
+anchor_ori_6d     = _rot6d_from_quat(rel_quat)
 ```
 
 朝向的计算结构和位置完全对称，只是旋转的"加减法"用四元数乘法表达。
@@ -186,13 +198,13 @@ anchor_ori_6d    = _rot6d_from_quat(rel_quat)
 ### 三步拆解（对应位置的三步）
 
 ```
-① _quat_mul(init_world_quat, ref_anchor_quat)
+① _quat_mul(init_world_quat, ref_anchor_quat_w)
    等价于矩阵：R_init_to_world @ R_ref_anchor
    将参考 torso 朝向从动作世界系转到机器人世界系（yaw 对齐，与位置步骤①对称）
 
-② _quat_mul(_quat_conj(robot_quat), aligned_quat)
-   等价于矩阵：R_robot.T @ R_aligned
-   "撤销机器人当前朝向"后叠加参考朝向，得到相对旋转差（与位置步骤②③合并的对称）
+② _quat_mul(_quat_conj(torso_quat_w), aligned_quat)
+   等价于矩阵：R_torso_w.T @ R_aligned
+   "撤销 torso 当前朝向"后叠加参考朝向，得到相对旋转差（与位置步骤②③合并的对称）
 
 ③ 归一化 + 转 6D rotation
    归一化消除浮点误差；6D rotation 是训练中常用的朝向表示
@@ -206,12 +218,12 @@ anchor_ori_6d    = _rot6d_from_quat(rel_quat)
 
 用四元数表示（绕 Z 轴转 30°）：
 ```
-ref_anchor_quat ≈ [cos15°, 0, 0, sin15°] ≈ [0.966, 0, 0, 0.259]
+ref_anchor_quat_w ≈ [cos15°, 0, 0, sin15°] ≈ [0.966, 0, 0, 0.259]
 ```
 
 机器人当前朝正北（绕 Z 轴转 90°）：
 ```
-robot_quat ≈ [cos45°, 0, 0, sin45°] ≈ [0.707, 0, 0, 0.707]
+torso_quat_w ≈ [cos45°, 0, 0, sin45°] ≈ [0.707, 0, 0, 0.707]
 ```
 
 `init_world_quat` 对应 yaw=90° 的旋转：
@@ -222,7 +234,7 @@ init_world_quat ≈ [0.707, 0, 0, 0.707]
 **步骤①：yaw 对齐**
 
 ```
-aligned_quat = init_world_quat ⊗ ref_anchor_quat
+aligned_quat = init_world_quat ⊗ ref_anchor_quat_w
              ≈ [0.707,0,0,0.707] ⊗ [0.966,0,0,0.259]
 ```
 
@@ -236,7 +248,7 @@ aligned_quat ≈ [cos60°, 0, 0, sin60°] ≈ [0.5, 0, 0, 0.866]
 **步骤②：计算相对旋转差**
 
 ```
-rel_quat = conj(robot_quat) ⊗ aligned_quat
+rel_quat = conj(torso_quat_w) ⊗ aligned_quat
          = conj([0.707,0,0,0.707]) ⊗ [0.5,0,0,0.866]
          = [0.707,0,0,-0.707] ⊗ [0.5,0,0,0.866]
 ```
@@ -281,8 +293,8 @@ Policy 接收这 6 个数，通过它们恢复出完整旋转矩阵，理解"tor
 | 步骤 | 位置 | 朝向 |
 |------|------|------|
 | ① yaw 对齐 | `R_init @ pos_motion` | `Q_init ⊗ Q_motion` |
-| ② 以机器人为参考 | `aligned_pos - robot_pos` | `Q_robot⁻¹ ⊗ Q_aligned` |
-| ③ 转到 body 系 | `R_robot.T @ delta_pos` | （已在步骤②中完成） |
+| ② 以 torso 为参考 | `aligned_pos - torso_pos_w` | `Q_torso⁻¹ ⊗ Q_aligned` |
+| ③ 转到 torso body 系 | `R_torso_w.T @ delta_pos` | （已在步骤②中完成） |
 | 输出形式 | (3,) float32 | (6,) 6D rotation |
 
 位置的步骤②和③是分开的两个操作（减法 + 旋转）；
@@ -305,21 +317,37 @@ NPZ（动作世界系）
                                    │ yaw 对齐
                                    ▼
                     机器人世界系中的参考 torso 位姿
-                           aligned_pos / aligned_quat
+                        aligned_pos / aligned_quat
                                    │
               ┌────────────────────┴────────────────────┐
               │ 位置                                     │ 朝向
-              │ - robot_torso_pos_w                      │ ⊗ conj(robot_quat)
-              │ R_robot.T @ delta                        │
+              │ - torso_pos_w                            │ ⊗ conj(torso_quat_w)
+              │ R_torso_w.T @ delta                      │
               ▼                                          ▼
         anchor_pos_b (3,)                    anchor_ori_6d (6,)
               │                                          │
               └──────────────────┬───────────────────────┘
                                  ▼
-                            obs[58:67]
-                                 │
-                            Policy 输入
-                           （告诉 Policy：参考 torso 在我的 body 系里的位置和朝向差值）
+                            obs[58:67]  →  Policy 输入
+                   （参考 torso 在机器人 torso body 系里的位置和朝向差值）
+
+
+MuJoCo 实时（机器人世界系）
+  d.qpos[0:3]  →  pelvis_pos_w  ──┐
+  d.qpos[3:7]  →  pelvis_quat_w ──┤  ball/target obs 基于 pelvis
+  d.xpos[ball] →  ball_pos_w  ────┤  （与训练 root_state_w 一致）
+  score.yaml   →  target_pos_w ───┘
+                                   │
+              ┌────────────────────┴────────────────────┐
+              │ 球                                       │ 目标点
+              │ ball_pos_w - pelvis_pos_w                │ target_pos_w - pelvis_pos_w
+              │ R_pelvis.T @ delta, clip ±8.0            │ R_pelvis.T @ delta, clip ±8.0
+              ▼                                          ▼
+        soccer_pos_b (3,/帧)               target_pos_b (3,/帧)
+              │                                          │
+              └──────── 5帧历史 ─────────────────────────┘
+                                 ▼
+                       obs[517:532] / obs[532:547]  →  Policy 输入
 ```
 
 ---
@@ -330,16 +358,20 @@ NPZ（动作世界系）
 
 A：不会。这个矩阵只做 yaw 对齐，它把"动作录制时的朝向"对齐到"机器人入场时的朝向"。
 这是一个固定的坐标变换，和之后机器人如何移动无关。
-每帧 run() 中，机器人当前的朝向通过 `robot_quat = state_cmd.torso_quat_w` 实时读取，
+每帧 run() 中，机器人当前的朝向通过 `torso_quat_w = state_cmd.torso_quat_w` 实时读取，
 所以步骤②的"减去机器人当前量"始终使用的是最新状态，不存在误差积累。
 
-**Q：为什么 aligned_anchor_pos_w 减的是 robot_torso_pos_w，而不是 robot_pelvis_pos_w？**
+**Q：anchor_pos_b 减的是 torso_pos_w，而 soccer_pos_b 减的是 pelvis_pos_w，为什么不统一？**
 
-A：训练时 anchor 的参考点就是 torso_link，所以"参考 torso 相对于机器人 torso 的偏移"才是有意义的观测。
-如果用 pelvis，腰部关节的弯曲就会使这个偏移量发生变化，而 policy 看不到这个变化的来源（pelvis 已经不在 obs 里），理解会混乱。
+A：因为训练时两者用的参考点不同：
+- anchor obs 的训练代码（`motion_anchor_pos_b`）使用 `robot_anchor_pos_w`，即 torso_link 的世界坐标。
+- ball/target obs 的训练代码（`soccer_robot_relative_pos_b` / `target_robot_relative_pos_b`）使用
+  `root_state_w[:, :3]`，即 pelvis（浮动基座）的世界坐标。
 
-**Q：`R_robot` 用的是 torso 的旋转矩阵，如果机器人向前倾（pitch），torso 也会倾斜，anchor_pos_b 会随之变化吗？**
+部署侧必须与训练侧完全一致，否则 obs 的物理含义对不上，policy 输出会混乱。
 
-A：会。这正是期望的行为：anchor_pos_b 表达的是"在机器人当前姿态的 body 系里，参考 torso 差在哪"。
-当机器人前倾时，body 系的 +X 也向下倾斜，anchor_pos_b 会反映出"参考 torso 在当前 body 系里偏后上方"，
+**Q：`R_torso_w` 用的是 torso 的旋转矩阵，如果机器人向前倾（pitch），torso 也会倾斜，anchor_pos_b 会随之变化吗？**
+
+A：会。这正是期望的行为：anchor_pos_b 表达的是"在机器人当前姿态的 torso body 系里，参考 torso 差在哪"。
+当机器人前倾时，torso body 系的 +X 也向下倾斜，anchor_pos_b 会反映出"参考 torso 在当前 body 系里偏后上方"，
 促使 policy 向前倾更多或调整姿态，这和训练时的观测定义是一致的。
