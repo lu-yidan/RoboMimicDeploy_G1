@@ -24,6 +24,7 @@ from unitree_sdk2py.utils.crc import CRC
 from common.command_helper import create_damping_cmd, create_zero_cmd, init_cmd_hg, init_cmd_go, MotorMode
 from common.rotation_helper import get_gravity_orientation_real, transform_imu_data, transform_pelvis_to_torso_complete
 from common.remote_controller import RemoteController, KeyMap
+from common.ball_state_dds import BallStateSubscriber
 from config import Config
 
 
@@ -62,7 +63,11 @@ class Controller:
         self.state_cmd = StateAndCmd(self.num_joints)                   # 定义了机器人的state
         self.policy_output = PolicyOutput(self.num_joints)              # 定义了action, kp, kd
         self.FSM_controller = FSM(self.state_cmd, self.policy_output)
-        
+
+        # Ball state subscriber (DDS, from on-robot ball_detector_service)
+        self.ball_sub = BallStateSubscriber(domain_id=0)
+        self.ball_sub.start()
+
         self.running = True
         self.counter_over_time = 0
         
@@ -155,6 +160,11 @@ class Controller:
             self.state_cmd.ang_vel = ang_vel.copy()
             self.state_cmd.torso_quat_w  = torso_quat
             self.state_cmd.root_ang_vel_b = ang_vel.flatten().astype(np.float32)
+
+            # Ball state from DDS (pelvis body frame, ~10 Hz)
+            ball = self.ball_sub.latest()
+            self.state_cmd.ball_pos_b = np.array([ball.x, ball.y, ball.z], dtype=np.float32)
+            self.state_cmd.ball_valid  = bool(ball.valid)
             
             self.FSM_controller.run()
             policy_output_action = self.policy_output.actions.copy()

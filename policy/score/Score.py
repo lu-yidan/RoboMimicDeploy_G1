@@ -180,9 +180,12 @@ class Score(FSMState):
         self.tau_limit       = np.array(cfg["tau_limit"],         dtype=np.float32)
         self.default_q_mj    = np.array(cfg["default_joint_pos"], dtype=np.float32)  # MuJoCo order
         self.action_scale_mj = np.array(cfg["action_scale"],      dtype=np.float32)  # MuJoCo order
-        self.clip_actions    = float(cfg.get("clip_actions", 3.0))
-        self.WARMUP_STEPS    = int(cfg.get("warmup_steps", 10))
-        self.target_pos_w    = np.array(cfg["target_pos"],        dtype=np.float32)  # world frame
+        self.clip_actions      = float(cfg.get("clip_actions", 3.0))
+        self.WARMUP_STEPS     = int(cfg.get("warmup_steps", 10))
+        self.target_pos_w     = np.array(cfg["target_pos"],        dtype=np.float32)  # world frame
+        # True on real robot: ball_pos is already in pelvis body frame (from DDS sensor).
+        # False in simulation: ball_pos is in world frame and needs coordinate transform.
+        self.use_body_frame_ball = bool(cfg.get("use_body_frame_ball", False))
 
         # Default joint pos in Isaac Lab order (for joint_pos_rel obs)
         self.default_q_il = self.default_q_mj[ISAAC_TO_MUJOCO]
@@ -233,6 +236,22 @@ class Score(FSMState):
         yaw_robot_mat  = _quat_to_matrix(_yaw_quat(robot_quat))
         self._init_to_world = yaw_robot_mat @ yaw_motion_mat.T
 
+        # ---- Target position in entry pelvis frame (real robot only) ----
+        # On real robot we have no absolute world coords, so we fix the target
+        # direction at entry time: target_pos_w expressed relative to the
+        # pelvis at the moment Score is activated, then kept constant.
+        if self.use_body_frame_ball:
+            pelvis_quat_entry = self.state_cmd.pelvis_quat_w.astype(np.float64)
+            R_pelvis_entry    = _quat_to_matrix(pelvis_quat_entry)
+            # target_pos_w is set in score.yaml as a world-frame offset from origin;
+            # treat it as "body-frame target at entry" (robot faces +x at deployment).
+            self.target_pos_b_entry = np.clip(
+                R_pelvis_entry.T @ self.target_pos_w.astype(np.float64),
+                -8.0, 8.0,
+            ).astype(np.float32)
+        else:
+            self.target_pos_b_entry = np.zeros(3, dtype=np.float32)
+
         # ---- Warm-up interpolation targets ----
         self._entry_q     = self.state_cmd.q.copy()
         # motion_joint_pos is in Isaac Lab order; convert to MuJoCo for warmup
@@ -282,12 +301,19 @@ class Score(FSMState):
         jvel_cur = dqj_il.astype(np.float32)                        # (29,)
 
         # ---- Ball and target in pelvis body frame (training uses root/pelvis, not torso) ----
-        robot_pelvis_pos_w = self.state_cmd.pelvis_pos_w.astype(np.float64)
-        R_pelvis = _quat_to_matrix(self.state_cmd.pelvis_quat_w.astype(np.float64))
-        ball_rel_w   = self.state_cmd.ball_pos_w.astype(np.float64) - robot_pelvis_pos_w
-        target_rel_w = self.target_pos_w.astype(np.float64) - robot_pelvis_pos_w
-        ball_pos_b   = np.clip(R_pelvis.T @ ball_rel_w,   -8.0, 8.0).astype(np.float32)
-        target_pos_b = np.clip(R_pelvis.T @ target_rel_w, -8.0, 8.0).astype(np.float32)
+        if self.use_body_frame_ball:
+            # Real robot: ball_pos_b comes directly from DDS (already in pelvis frame).
+            # target is expressed relative to pelvis at entry, stored in self.target_pos_b_entry.
+            ball_pos_b   = np.clip(self.state_cmd.ball_pos_b,   -8.0, 8.0).astype(np.float32)
+            target_pos_b = np.clip(self.target_pos_b_entry,     -8.0, 8.0).astype(np.float32)
+        else:
+            # Simulation: transform from world frame using pelvis pos/quat.
+            robot_pelvis_pos_w = self.state_cmd.pelvis_pos_w.astype(np.float64)
+            R_pelvis    = _quat_to_matrix(self.state_cmd.pelvis_quat_w.astype(np.float64))
+            ball_rel_w  = self.state_cmd.ball_pos_w.astype(np.float64) - robot_pelvis_pos_w
+            target_rel_w = self.target_pos_w.astype(np.float64) - robot_pelvis_pos_w
+            ball_pos_b   = np.clip(R_pelvis.T @ ball_rel_w,   -8.0, 8.0).astype(np.float32)
+            target_pos_b = np.clip(R_pelvis.T @ target_rel_w, -8.0, 8.0).astype(np.float32)
 
         # ---- Update history buffers ----
         self._ang_vel_buf.append(self.state_cmd.root_ang_vel_b.copy())
