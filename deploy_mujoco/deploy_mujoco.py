@@ -129,6 +129,8 @@ def main(cfg: DictConfig):
                     state_cmd.root_ang_vel_b = d.qvel[3:6].astype(np.float32)  # body frame in MuJoCo
                     state_cmd.torso_pos_w  = d.xpos[torso_body_id].astype(np.float32)
                     state_cmd.torso_quat_w = d.xquat[torso_body_id].astype(np.float32)  # [w,x,y,z]
+                    state_cmd.pelvis_pos_w  = d.qpos[0:3].astype(np.float32)
+                    state_cmd.pelvis_quat_w = d.qpos[3:7].astype(np.float32)  # [w,x,y,z]
 
                     # Ball state (only valid when scene_with_ball.xml is loaded)
                     if ball_body_id >= 0:

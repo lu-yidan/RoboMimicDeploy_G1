@@ -251,25 +251,27 @@ class Score(FSMState):
         actions(145) | soccer_pos_b(15) | target_pos_b(15)
         """
         t = min(self.time_step - self.WARMUP_STEPS, self.motion_total_steps - 1)
-        robot_quat = self.state_cmd.torso_quat_w.astype(np.float64)
-        R_robot    = _quat_to_matrix(robot_quat)
+
+        # anchor obs uses torso_link as reference body (matches training: anchor_body_name = "torso_link")
+        torso_quat_w = self.state_cmd.torso_quat_w.astype(np.float64)
+        R_torso_w    = _quat_to_matrix(torso_quat_w)
+        torso_pos_w  = self.state_cmd.torso_pos_w.astype(np.float64)
 
         # ---- command: ref_jpos + ref_jvel (Isaac Lab order) ----
         ref_jpos = self.motion_joint_pos[t]   # (29,) Isaac Lab order
         ref_jvel = self.motion_joint_vel[t]   # (29,) Isaac Lab order
 
-        # ---- motion_anchor_pos_b ----
-        # Yaw-align the reference anchor world position, then express in robot body frame.
-        init_world_quat  = _matrix_to_quat(self._init_to_world)
-        ref_anchor_pos_w = self.motion_body_pos[t, NPZ_ANCHOR_IDX].astype(np.float64)
+        # ---- motion_anchor_pos_b (relative to torso, expressed in torso body frame) ----
+        # Yaw-align the reference anchor world position, then express in torso body frame.
+        init_world_quat      = _matrix_to_quat(self._init_to_world)
+        ref_anchor_pos_w     = self.motion_body_pos[t, NPZ_ANCHOR_IDX].astype(np.float64)
         aligned_anchor_pos_w = self._init_to_world @ ref_anchor_pos_w
-        robot_torso_pos_w    = self.state_cmd.torso_pos_w.astype(np.float64)
-        anchor_pos_b = (R_robot.T @ (aligned_anchor_pos_w - robot_torso_pos_w)).astype(np.float32)
+        anchor_pos_b = (R_torso_w.T @ (aligned_anchor_pos_w - torso_pos_w)).astype(np.float32)
 
-        # ---- motion_anchor_ori_b ----
-        ref_anchor_quat  = self.motion_body_quat[t, NPZ_ANCHOR_IDX].astype(np.float64)
-        aligned_quat     = _quat_mul(init_world_quat, ref_anchor_quat)
-        rel_quat = _quat_mul(_quat_conj(robot_quat), aligned_quat)
+        # ---- motion_anchor_ori_b (relative to torso orientation, in torso body frame) ----
+        ref_anchor_quat_w = self.motion_body_quat[t, NPZ_ANCHOR_IDX].astype(np.float64)
+        aligned_quat      = _quat_mul(init_world_quat, ref_anchor_quat_w)
+        rel_quat = _quat_mul(_quat_conj(torso_quat_w), aligned_quat)
         rel_quat = rel_quat / np.linalg.norm(rel_quat)
         anchor_ori_6d = _rot6d_from_quat(rel_quat)   # (6,)
 
@@ -279,11 +281,13 @@ class Score(FSMState):
         jpos_cur = (qj_il - self.default_q_il).astype(np.float32)   # (29,)
         jvel_cur = dqj_il.astype(np.float32)                        # (29,)
 
-        # ---- Ball and target in body frame ----
-        ball_rel_w   = self.state_cmd.ball_pos_w.astype(np.float64) - robot_torso_pos_w
-        target_rel_w = self.state_cmd.target_pos_w.astype(np.float64) - robot_torso_pos_w
-        ball_pos_b   = np.clip(R_robot.T @ ball_rel_w,   -18.0, 18.0).astype(np.float32)
-        target_pos_b = np.clip(R_robot.T @ target_rel_w, -18.0, 18.0).astype(np.float32)
+        # ---- Ball and target in pelvis body frame (training uses root/pelvis, not torso) ----
+        robot_pelvis_pos_w = self.state_cmd.pelvis_pos_w.astype(np.float64)
+        R_pelvis = _quat_to_matrix(self.state_cmd.pelvis_quat_w.astype(np.float64))
+        ball_rel_w   = self.state_cmd.ball_pos_w.astype(np.float64) - robot_pelvis_pos_w
+        target_rel_w = self.state_cmd.target_pos_w.astype(np.float64) - robot_pelvis_pos_w
+        ball_pos_b   = np.clip(R_pelvis.T @ ball_rel_w,   -8.0, 8.0).astype(np.float32)
+        target_pos_b = np.clip(R_pelvis.T @ target_rel_w, -8.0, 8.0).astype(np.float32)
 
         # ---- Update history buffers ----
         self._ang_vel_buf.append(self.state_cmd.root_ang_vel_b.copy())

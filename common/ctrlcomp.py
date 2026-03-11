@@ -19,6 +19,9 @@ class StateAndCmd:
         self.root_ang_vel_b = np.zeros(3, dtype=np.float32)
         self.torso_pos_w  = np.zeros(3, dtype=np.float32)
         self.torso_quat_w = np.array([1., 0., 0., 0.], dtype=np.float32)  # [w,x,y,z]
+        # pelvis (floating base) state for Score controller (world frame, filled in deploy_mujoco)
+        self.pelvis_pos_w  = np.zeros(3, dtype=np.float32)
+        self.pelvis_quat_w = np.array([1., 0., 0., 0.], dtype=np.float32)  # [w,x,y,z]
         # ball and target state for Score controller (world frame, filled in deploy_mujoco)
         self.ball_pos_w    = np.zeros(3, dtype=np.float32)
         self.ball_vel_w    = np.zeros(3, dtype=np.float32)
