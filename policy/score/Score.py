@@ -236,6 +236,11 @@ class Score(FSMState):
         yaw_robot_mat  = _quat_to_matrix(_yaw_quat(robot_quat))
         self._init_to_world = yaw_robot_mat @ yaw_motion_mat.T
 
+        # ---- Anchor reference origin (for relative displacement, avoids needing absolute torso_pos_w) ----
+        ref_anchor_0 = self.motion_body_pos[0, NPZ_ANCHOR_IDX].astype(np.float64)
+        self._ref_anchor_world_origin = self._init_to_world @ ref_anchor_0
+        self._entry_torso_pos_w = self.state_cmd.torso_pos_w.copy().astype(np.float64)
+
         # ---- Target position in entry pelvis frame (real robot only) ----
         # On real robot we have no absolute world coords, so we fix the target
         # direction at entry time: target_pos_w expressed relative to the
@@ -285,7 +290,12 @@ class Score(FSMState):
         init_world_quat      = _matrix_to_quat(self._init_to_world)
         ref_anchor_pos_w     = self.motion_body_pos[t, NPZ_ANCHOR_IDX].astype(np.float64)
         aligned_anchor_pos_w = self._init_to_world @ ref_anchor_pos_w
-        anchor_pos_b = (R_torso_w.T @ (aligned_anchor_pos_w - torso_pos_w)).astype(np.float32)
+        # anchor displacement from motion start, minus robot displacement from entry.
+        # On real robot torso_pos_w stays zero, so robot displacement = 0 and the two zeros cancel.
+        # In sim, both terms are meaningful.
+        anchor_disp_w = aligned_anchor_pos_w - self._ref_anchor_world_origin
+        robot_disp_w  = torso_pos_w - self._entry_torso_pos_w
+        anchor_pos_b  = (R_torso_w.T @ (anchor_disp_w - robot_disp_w)).astype(np.float32)
 
         # ---- motion_anchor_ori_b (relative to torso orientation, in torso body frame) ----
         ref_anchor_quat_w = self.motion_body_quat[t, NPZ_ANCHOR_IDX].astype(np.float64)

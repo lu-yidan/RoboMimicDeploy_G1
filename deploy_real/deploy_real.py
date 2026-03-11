@@ -159,6 +159,7 @@ class Controller:
             self.state_cmd.gravity_ori = gravity_orientation.copy()
             self.state_cmd.ang_vel = ang_vel.copy()
             self.state_cmd.torso_quat_w  = torso_quat
+            self.state_cmd.pelvis_quat_w = np.array(quat, dtype=np.float32)  # raw IMU [w,x,y,z]
             self.state_cmd.root_ang_vel_b = ang_vel.flatten().astype(np.float32)
 
             # Ball state from DDS (pelvis body frame, ~10 Hz)
