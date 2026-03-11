@@ -52,7 +52,11 @@ def main(cfg: DictConfig):
     kps = np.zeros(num_joints, dtype=np.float32)
     kds = np.zeros(num_joints, dtype=np.float32)
     sim_counter = 0
-    
+    # Ball sensor runs at 10 Hz; control loop runs at 50 Hz → update every 5 control steps.
+    control_hz = 1.0 / (simulation_dt * control_decimation)
+    ball_sensor_decimation = max(1, round(control_hz / cfg.get("ball_sensor_hz", 10)))
+    ball_sensor_counter = 0
+
     state_cmd = StateAndCmd(num_joints)
     policy_output = PolicyOutput(num_joints)
     FSM_controller = FSM(state_cmd, policy_output)
@@ -132,12 +136,14 @@ def main(cfg: DictConfig):
                     state_cmd.pelvis_pos_w  = d.qpos[0:3].astype(np.float32)
                     state_cmd.pelvis_quat_w = d.qpos[3:7].astype(np.float32)  # [w,x,y,z]
 
-                    # Ball state (only valid when scene_with_ball.xml is loaded)
-                    if ball_body_id >= 0:
+                    # Ball state (only valid when scene_with_ball.xml is loaded).
+                    # Throttled to ball_sensor_hz to simulate real-sensor update rate.
+                    if ball_body_id >= 0 and ball_sensor_counter % ball_sensor_decimation == 0:
                         state_cmd.ball_pos_w = d.xpos[ball_body_id].astype(np.float32)
                         ball_jnt_adr = m.body_jntadr[ball_body_id]
                         ball_qvel_adr = m.jnt_dofadr[ball_jnt_adr]
                         state_cmd.ball_vel_w = d.qvel[ball_qvel_adr:ball_qvel_adr+3].astype(np.float32)
+                    ball_sensor_counter += 1
 
                     FSM_controller.run()
                     policy_output_action = policy_output.actions.copy()
