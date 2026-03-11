@@ -9,6 +9,7 @@ from policy.asap.asap import ASAP
 from policy.host.host import HOST
 from policy.beyondmimic.BeyondMimic import BeyondMimic
 from policy.beyondmimic_mj.BeyondMimicMJ import BeyondMimicMJ
+from policy.score.Score import Score
 from policy.skill_cooldown.SkillCooldown import SkillCooldown
 from policy.skill_cast.SkillCast import SkillCast
 from policy.kick.Kick import Kick
@@ -45,6 +46,7 @@ class FSM:
         self.host_policy = HOST(state_cmd, policy_output)
         self.beyondmimic_policy = BeyondMimic(state_cmd, policy_output)
         self.beyondmimic_mj_policy = BeyondMimicMJ(state_cmd, policy_output)
+        self.score_policy = Score(state_cmd, policy_output)
 
         print("initalized all policies!!!")
         
@@ -112,6 +114,8 @@ class FSM:
             self.cur_policy = self.beyondmimic_policy
         elif((policy_name == FSMStateName.SKILL_BEYONDMIMIC_MJ)):
             self.cur_policy = self.beyondmimic_mj_policy
+        elif((policy_name == FSMStateName.SKILL_SCORE)):
+            self.cur_policy = self.score_policy
         else:
             pass
             

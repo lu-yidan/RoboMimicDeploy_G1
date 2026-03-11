@@ -121,6 +121,8 @@ class Controller:
                 self.state_cmd.skill_cmd = FSMCommand.SKILL_6
             if self.remote_controller.is_button_pressed(KeyMap.up) and self.remote_controller.is_button_pressed(KeyMap.R1):   # BeyondMimicMJ, R1+Up
                 self.state_cmd.skill_cmd = FSMCommand.SKILL_7
+            if self.remote_controller.is_button_pressed(KeyMap.down) and self.remote_controller.is_button_pressed(KeyMap.R1):  # Score, R1+Down
+                self.state_cmd.skill_cmd = FSMCommand.SKILL_8
             # if self.remote_controller.is_button_pressed(KeyMap.B) and self.remote_controller.is_button_pressed(KeyMap.R1):
             #     self.state_cmd.skill_cmd = FSMCommand.SKILL_3
             # if self.remote_controller.is_button_pressed(KeyMap.Y) and self.remote_controller.is_button_pressed(KeyMap.L1):

@@ -44,6 +44,7 @@ def main(cfg: DictConfig):
     d = mujoco.MjData(m)
     m.opt.timestep = simulation_dt
     torso_body_id = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "torso_link")
+    ball_body_id  = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "ball")  # -1 if no ball in scene
     mj_per_step_duration = simulation_dt * control_decimation
     num_joints = m.nu
     print(f"num_joints: {num_joints}")
@@ -93,6 +94,8 @@ def main(cfg: DictConfig):
                     state_cmd.skill_cmd = FSMCommand.SKILL_6
                 elif hat_just_pressed(0, 1) and joystick.is_button_pressed(JoystickButton.R1):   # BeyondMimicMJ, R1+D-pad UP
                     state_cmd.skill_cmd = FSMCommand.SKILL_7
+                elif hat_just_pressed(0, -1) and joystick.is_button_pressed(JoystickButton.R1):  # Score, R1+D-pad DOWN
+                    state_cmd.skill_cmd = FSMCommand.SKILL_8
 
                 prev_hat = hat
                 state_cmd.vel_cmd[0] = -joystick.get_axis_value(1)
@@ -101,15 +104,15 @@ def main(cfg: DictConfig):
                 
                 step_start = time.time()
                 
-                tau = pd_control(policy_output_action, d.qpos[7:], kps, np.zeros_like(kps), d.qvel[6:], kds)
+                tau = pd_control(policy_output_action, d.qpos[7:7+num_joints], kps, np.zeros_like(kps), d.qvel[6:6+num_joints], kds)
                 tau = np.clip(tau, -tau_limit, tau_limit)
                 d.ctrl[:] = tau
                 mujoco.mj_step(m, d)
                 FSM_controller.sim_counter += 1
                 if FSM_controller.sim_counter % control_decimation == 0:
                     
-                    qj = d.qpos[7:]
-                    dqj = d.qvel[6:]
+                    qj = d.qpos[7:7+num_joints]
+                    dqj = d.qvel[6:6+num_joints]
                     quat = d.qpos[3:7]
                     
                     omega = d.qvel[3:6] 
@@ -126,6 +129,13 @@ def main(cfg: DictConfig):
                     state_cmd.root_ang_vel_b = d.qvel[3:6].astype(np.float32)  # body frame in MuJoCo
                     state_cmd.torso_pos_w  = d.xpos[torso_body_id].astype(np.float32)
                     state_cmd.torso_quat_w = d.xquat[torso_body_id].astype(np.float32)  # [w,x,y,z]
+
+                    # Ball state (only valid when scene_with_ball.xml is loaded)
+                    if ball_body_id >= 0:
+                        state_cmd.ball_pos_w = d.xpos[ball_body_id].astype(np.float32)
+                        ball_jnt_adr = m.body_jntadr[ball_body_id]
+                        ball_qvel_adr = m.jnt_dofadr[ball_jnt_adr]
+                        state_cmd.ball_vel_w = d.qvel[ball_qvel_adr:ball_qvel_adr+3].astype(np.float32)
 
                     FSM_controller.run()
                     policy_output_action = policy_output.actions.copy()

@@ -66,6 +66,9 @@ class FixedPose(FSMState):
         elif(self.state_cmd.skill_cmd == FSMCommand.PASSIVE):
             self.state_cmd.skill_cmd = FSMCommand.INVALID
             return FSMStateName.PASSIVE
+        elif(self.state_cmd.skill_cmd == FSMCommand.SKILL_8):
+            self.state_cmd.skill_cmd = FSMCommand.INVALID
+            return FSMStateName.SKILL_SCORE
         else:
             self.state_cmd.skill_cmd = FSMCommand.INVALID
             return FSMStateName.FIXEDPOSE

@@ -73,6 +73,7 @@ python deploy_mujoco/deploy_mujoco.py
 | **SkillCooldown** | 下肢+腰部持续平衡，上肢恢复至默认关节角，一般在执行Mimic策略后执行 |
 | **BeyondMimic**   | 运动模仿策略（Isaac Lab训练，BFS关节顺序）                |
 | **BeyondMimicMJ** | 运动模仿策略（mjlab训练，MuJoCo DFS关节顺序，无需重排列）       |
+| **Score**         | 带球入门策略：547维obs，5帧历史，含球位置与目标位置跟踪；需使用 `mujoco_score` 配置（含球的场景） |
 
 ## 3. 仿真操作说明
 
@@ -137,6 +138,14 @@ python deploy_mujoco/deploy_mujoco.py xml_path=g1_description/g1_29dof_LieDown.x
 
 12. 在LocoMode模式下，按 R1+D-pad UP 触发 BeyondMimicMJ 运动模仿策略（mjlab训练版本）
 
+13. Score 带球入门策略需单独启动含球场景：
+
+    ```bash
+    python deploy_mujoco/deploy_mujoco.py --config-name mujoco_score
+    ```
+
+    启动后，在LocoMode模式下按 **R1+D-pad DOWN** 触发 Score 策略，机器人将追踪参考动作并将球踢向目标点（默认正前方 5m）。
+
 ## 4. 真机操作说明
 
 1. 开机后将机器人吊起来
@@ -155,7 +164,9 @@ python deploy_real/deploy_real.py
 
 6. 在LocoMode模式下，按 R1+Up（D-pad 上键）触发 BeyondMimicMJ 运动模仿策略
 
-7. 其他动作操作与仿真中一致
+7. 在LocoMode模式下，按 R1+Down（D-pad 下键）触发 Score 带球入门策略（真机需球在场地上）
+
+8. 其他动作操作与仿真中一致
 
 ## 注意事项
 

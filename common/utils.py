@@ -19,6 +19,7 @@ class FSMStateName(Enum):
     STANDMODE = 11
     SKILL_BEYONDMIMIC = 12
     SKILL_BEYONDMIMIC_MJ = 13
+    SKILL_SCORE = 14
 
 @unique
 class FSMCommand(Enum):
@@ -34,6 +35,7 @@ class FSMCommand(Enum):
     STAND_UP = 11
     SKILL_6 = 12
     SKILL_7 = 13
+    SKILL_8 = 14
 
 
 
