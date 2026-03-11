@@ -35,17 +35,92 @@ onboard/
 
 ---
 
+## 新机器环境配置（CycloneDDS Python 绑定）
+
+> 机载电脑已经预装了 Unitree 提供的 CycloneDDS C 库（位于
+> `~/unitree_ros2/cyclonedds_ws/install/cyclonedds`）。
+> `pip install cyclonedds` **不能直接使用**，因为它会在编译 Python 绑定时拉取
+> 系统里其他版本的头文件，导致运行时库不匹配（`DDS_RETCODE_BAD_PARAMETER` 或
+> `undefined symbol` 等错误）。
+> 必须让 Python 绑定**对准 Unitree 自带的那套 CycloneDDS** 来编译。
+
+### 步骤
+
+```bash
+# 1. 激活你的 Python 环境
+conda activate robomimic   # 按实际环境名修改
+
+# 2. 指向 Unitree 自带的 CycloneDDS（头文件 + 库）
+export CYCLONEDDS_HOME=~/unitree_ros2/cyclonedds_ws/install/cyclonedds
+export CMAKE_PREFIX_PATH="$CYCLONEDDS_HOME:${CMAKE_PREFIX_PATH:-}"
+export CPATH="$CYCLONEDDS_HOME/include:${CPATH:-}"
+export LIBRARY_PATH="$CYCLONEDDS_HOME/lib:${LIBRARY_PATH:-}"
+
+# 3. 编译安装（不使用缓存，强制重新编译）
+pip install --no-build-isolation --no-cache-dir "cyclonedds==0.10.5"
+```
+
+> **注意**：如果系统 `/usr/local/include/dds/` 里有其他版本的 CycloneDDS 头文件，
+> 上面的 `CPATH` 变量优先级高于系统路径，通常不需要手动移走，但如果 pip 编译时
+> 仍报 `conflicting types for dds_stream_*`，需要先执行：
+> ```bash
+> sudo mv /usr/local/include/dds /usr/local/include/dds.bak
+> # pip install 成功后恢复
+> sudo mv /usr/local/include/dds.bak /usr/local/include/dds
+> ```
+
+### 验证安装
+
+```bash
+# 确认运行时链接到正确的 libddsc.so
+ldd $(python -c "import sysconfig; print(sysconfig.get_path('platlib'))")/cyclonedds/_clayer.cpython-*-linux-aarch64.so | grep ddsc
+# 应显示 => ~/unitree_ros2/cyclonedds_ws/install/cyclonedds/lib/libddsc.so.0
+
+# 快速功能测试
+python -c "from cyclonedds.domain import DomainParticipant; DomainParticipant(0); print('cyclonedds ok')"
+```
+
+### ~/.bashrc 注意事项
+
+Unitree 机器默认的 `~/.bashrc` 里可能有如下几行，会在每个终端自动 `source`
+旧版 CycloneDDS RMW 并设置 `RMW_IMPLEMENTATION=rmw_cyclonedds_cpp`，
+这和 Python DDS 环境冲突，建议**注释掉**：
+
+```bash
+# 注释掉 fishros 那一整块（若有）
+# echo "ros:foxy(1) noetic(2) ?"
+# read choose
+# case $choose in
+# 1) source /opt/ros/foxy/setup.bash;
+# source ~/cyclonedds_ws/install/setup.bash;
+# export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp; ...
+# esac
+
+# 注释掉以下两行（若有）
+# source ~/unitree_ros2/setup.sh
+# export CYCLONEDDS_HOME=/usr/local
+```
+
+每次新开终端，手动按需 source：
+
+```bash
+conda activate robomimic
+source /opt/ros/foxy/setup.bash
+source ~/yixuan/yichao-deploy/ws_livox/install/setup.sh
+```
+
+---
+
 ## 快速启动
 
 ### 1. 依赖
 
-机载电脑需要安装：
+机载电脑需要安装（参照上方「新机器环境配置」）：
 
 ```bash
-# ROS2（Humble 或 Foxy）
-# livox_ros_driver2（MID360 ROS2 驱动）
-# unitree_sdk2_python（用于订阅 /lowstate 获取关节角）
-pip install cyclonedds
+# ROS2 Foxy（已预装）
+# livox_ros_driver2（MID360 ROS2 驱动，已预装于 ws_livox）
+# cyclonedds Python 绑定（见上方步骤，不能直接 pip install cyclonedds）
 ```
 
 ### 2. 启动 MID360 驱动
