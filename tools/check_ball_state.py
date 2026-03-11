@@ -26,7 +26,7 @@ def main():
                 f"[{status}]  "
                 f"x={ball.x:+.3f}  y={ball.y:+.3f}  z={ball.z:+.3f}  "
                 f"age={age_ms:.0f}ms",
-                end="\r",
+                end="\033[K\r",
             )
             time.sleep(0.05)
     except KeyboardInterrupt:
