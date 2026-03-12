@@ -49,7 +49,27 @@ Pelvis Body Frame（pelvis body 系）
 
 ---
 
-## 第一步：`_init_to_world`——入场时的 yaw 对齐矩阵
+## 第一步：`enter()` 什么时候被调用
+
+`enter()` 在玩家切换到 Score 状态时，**只执行一次**：
+
+```
+玩家按下 R1+Down
+    → FSMCommand.SKILL_8
+    → FSM 检测到状态切换
+    → old_policy.exit()
+    → Score.enter()   ← 在这里，只执行一次
+    → 之后每帧 Score.run()
+```
+
+`enter()` 里做的事：
+- 读取 IMU 当前四元数，计算 `_init_to_world`（yaw 对齐矩阵，之后固定不变）
+- 记录参考动作 t=0 的 anchor 世界坐标 `_ref_anchor_world_origin`（之后固定不变）
+- 记录当前 `torso_pos_w` 作为 `_entry_torso_pos_w`（之后固定不变）
+
+---
+
+## 第二步：`_init_to_world`——入场时的 yaw 对齐矩阵
 
 在 `enter()` 中只计算一次：
 
@@ -95,7 +115,7 @@ _init_to_world = yaw_robot_mat @ I.T = yaw_robot_mat
 
 ---
 
-## 二、`motion_anchor_pos_b` 的计算
+## 三、`motion_anchor_pos_b` 的计算
 
 ```python
 # anchor obs 使用 torso 作为参考 body（训练配置：anchor_body_name = "torso_link"）
@@ -104,10 +124,50 @@ R_torso_w    = _quat_to_matrix(torso_quat_w)
 torso_pos_w  = self.state_cmd.torso_pos_w.astype(np.float64)
 
 init_world_quat      = _matrix_to_quat(self._init_to_world)
-ref_anchor_pos_w     = self.motion_body_pos[t, NPZ_ANCHOR_IDX]
+ref_anchor_pos_w     = self.motion_body_pos[t, NPZ_ANCHOR_IDX]   # ← 来自 NPZ，不是传感器
 aligned_anchor_pos_w = self._init_to_world @ ref_anchor_pos_w
-anchor_pos_b = R_torso_w.T @ (aligned_anchor_pos_w - torso_pos_w)
+
+anchor_disp_w = aligned_anchor_pos_w - self._ref_anchor_world_origin  # 参考从起点走了多远
+robot_disp_w  = torso_pos_w - self._entry_torso_pos_w                 # 机器人从起点走了多远
+anchor_pos_b  = R_torso_w.T @ (anchor_disp_w - robot_disp_w)
 ```
+
+### `aligned_anchor_pos_w` 来自哪里
+
+`aligned_anchor_pos_w` **完全来自 NPZ 离线文件**，和真机传感器无关：
+
+```
+self.motion_body_pos[t, NPZ_ANCHOR_IDX]   ← NPZ 里第 t 帧 torso_link 的世界坐标
+self._init_to_world @ (...)               ← 旋转对齐到机器人初始朝向（enter() 时算一次，之后固定）
+```
+
+每帧 `run()` 只是查 NPZ 表格里第 t 行的数据，再乘一个固定矩阵。
+
+### 为什么用相对位移而非绝对坐标
+
+**原始想法**（有问题）：
+```
+anchor_pos_b = R_torso_w.T @ (aligned_anchor_pos_w - torso_pos_w)
+               ↑参考的绝对世界坐标            ↑机器人的绝对世界坐标
+```
+
+真机没有绝对位置，`torso_pos_w` 永远是 `[0,0,0]`，但 `aligned_anchor_pos_w` 在参考动作中
+可能是 `[1.5, 0, 0.8]`，直接相减结果完全错误。
+
+**当前方案**（相对位移）：
+
+```
+参考走了多远 = aligned_anchor_pos_w[t] - aligned_anchor_pos_w[0]
+机器人走了多远 = torso_pos_w[t] - torso_pos_w[entry]
+anchor_pos_b = R_torso_w.T @ (参考走了多远 - 机器人走了多远)
+```
+
+| 场景 | 参考位移 | 机器人位移 | 结果 |
+|------|---------|-----------|------|
+| 仿真 | 来自 NPZ | 来自 MuJoCo | 精确差值 |
+| 真机 | 来自 NPZ | 0（无里程计）| ≈ 参考位移（近似，机器人走了多少没减掉）|
+
+真机上近似的含义：**"按参考动作，我的 torso 从出发点应该走到哪里"**，用当前 torso 朝向表达。
 
 ### 三步拆解
 
@@ -352,7 +412,78 @@ MuJoCo 实时（机器人世界系）
 
 ---
 
-## 六、常见疑问
+## 六、仿真 vs 真机：每个量的来源对比
+
+| obs 量 | 仿真（deploy_mujoco） | 真机（deploy_real） | 差异说明 |
+|--------|----------------------|---------------------|---------|
+| `torso_quat_w` | `d.xquat[torso_id]`（MuJoCo 直接读） | IMU 四元数 + 腰关节 FK（`transform_pelvis_to_torso_complete`） | 真机经过腰关节变换，但物理含义相同 |
+| `torso_pos_w` | `d.xpos[torso_id]`（MuJoCo 直接读） | 永远是 `[0,0,0]`（无里程计） | **关键差异**，影响 anchor_pos_b |
+| `pelvis_quat_w` | `d.qpos[3:7]`（MuJoCo free joint） | IMU 原始四元数 `[w,x,y,z]` | 相同物理含义，来源不同 |
+| `pelvis_pos_w` | `d.qpos[0:3]`（MuJoCo free joint） | 永远是 `[0,0,0]`（无里程计） | 真机 ball/target 通过其他方式绕过 |
+| `ball_pos` | MuJoCo 世界坐标，再转到 pelvis body 系 | DDS 直接给出 pelvis body 系坐标 | 来源不同，结果含义相同 |
+| `target_pos_b` | 每帧实时计算（用 pelvis 世界坐标） | `enter()` 时算一次，之后固定 | 真机无绝对坐标，只能在入场时估算一次 |
+
+### anchor_pos_b 的计算差异
+
+代码里用 `use_body_frame_ball` flag 分两条路径，物理含义和精度不同：
+
+**仿真**（`use_body_frame_ball=false`，`torso_pos_w` 来自 MuJoCo，精确）：
+```python
+anchor_pos_b = R_torso_w.T @ (aligned_anchor_pos_w - torso_pos_w)
+```
+含义：参考 torso 的绝对世界坐标 − 机器人 torso 的绝对世界坐标，转到 torso body 系。
+**与训练公式完全一致。**
+
+**真机**（`use_body_frame_ball=true`，`torso_pos_w` 永远是零）：
+```python
+anchor_disp_w = aligned_anchor_pos_w - self._ref_anchor_world_origin  # 参考从t=0走的位移
+robot_disp_w  = torso_pos_w - self._entry_torso_pos_w                 # 机器人从enter()走的位移（=0）
+anchor_pos_b  = R_torso_w.T @ (anchor_disp_w - robot_disp_w)
+```
+含义：参考 torso 的位移 − 机器人 torso 的位移，转到 torso body 系。
+
+#### 两个公式的关系
+
+展开真机公式：
+```
+new = R_torso_w.T @ (aligned_pos[t] - torso_pos[t]) - R_torso_w.T @ (ref_origin - entry_torso_pos)
+    = 旧公式 - 常数偏移
+```
+
+偏移量 = `R_torso_w.T @ (_ref_anchor_world_origin - _entry_torso_pos_w)`
+
+**当 `_ref_anchor_world_origin ≈ _entry_torso_pos_w` 时，偏移为零，两公式等价。**
+
+训练时 Isaac Lab 在每次 episode reset 时让机器人 torso 与参考动作 t=0 的 anchor 对齐，
+所以偏移 ≈ 0，两公式等价。仿真部署时 robot spawn 在原点附近，参考动作起点也在原点附近，偏移同样很小。
+
+#### 真机近似误差
+
+真机上 `robot_disp_w = 0`（无里程计），所以机器人实际走的距离没有被减掉。
+如果机器人跟上了参考动作，两者位移接近，误差较小；如果落后了，误差会累积。
+根本解决方案是补上支撑腿里程计（stance-leg odometry），目前作为近似使用。
+
+### anchor_ori_b 的计算差异
+
+**没有差异**。朝向只需要 `torso_quat_w`，仿真和真机都能实时拿到（MuJoCo vs IMU+腰关节FK），不依赖绝对位置。
+
+### ball_pos 的计算差异
+
+```python
+# score.yaml: use_body_frame_ball 控制分支
+
+# 仿真（false）：
+ball_pos_b = R_pelvis.T @ (ball_pos_w - pelvis_pos_w)   # MuJoCo 世界坐标 → pelvis body 系
+
+# 真机（true）：
+ball_pos_b = state_cmd.ball_pos_b                        # DDS 直接给出 pelvis body 系，跳过变换
+```
+
+两者的结果在物理上等价，只是来源不同。
+
+---
+
+## 七、常见疑问
 
 **Q：`_init_to_world` 是在 enter() 时计算的，之后 run() 里每帧都用同一个矩阵，会不会有误差？**
 
