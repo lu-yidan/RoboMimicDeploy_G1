@@ -246,12 +246,12 @@ class Score(FSMState):
         # direction at entry time: target_pos_w expressed relative to the
         # pelvis at the moment Score is activated, then kept constant.
         if self.use_body_frame_ball:
+            # target_pos is a body-frame offset at entry (+x = forward).
+            # Record entry yaw so _build_obs() can track target direction as robot rotates.
             pelvis_quat_entry = self.state_cmd.pelvis_quat_w.astype(np.float64)
-            R_pelvis_entry    = _quat_to_matrix(pelvis_quat_entry)
-            # target_pos_w is set in score.yaml as a world-frame offset from origin;
-            # treat it as "body-frame target at entry" (robot faces +x at deployment).
+            self._entry_yaw_mat = _quat_to_matrix(_yaw_quat(pelvis_quat_entry))  # 3×3
             self.target_pos_b_entry = np.clip(
-                R_pelvis_entry.T @ self.target_pos_w.astype(np.float64),
+                self.target_pos_w.astype(np.float64),
                 -8.0, 8.0,
             ).astype(np.float32)
         else:
@@ -290,12 +290,16 @@ class Score(FSMState):
         init_world_quat      = _matrix_to_quat(self._init_to_world)
         ref_anchor_pos_w     = self.motion_body_pos[t, NPZ_ANCHOR_IDX].astype(np.float64)
         aligned_anchor_pos_w = self._init_to_world @ ref_anchor_pos_w
-        # anchor displacement from motion start, minus robot displacement from entry.
-        # On real robot torso_pos_w stays zero, so robot displacement = 0 and the two zeros cancel.
-        # In sim, both terms are meaningful.
-        anchor_disp_w = aligned_anchor_pos_w - self._ref_anchor_world_origin
-        robot_disp_w  = torso_pos_w - self._entry_torso_pos_w
-        anchor_pos_b  = (R_torso_w.T @ (anchor_disp_w - robot_disp_w)).astype(np.float32)
+        if self.use_body_frame_ball:
+            # Real robot: torso_pos_w is always zero (no odometry).
+            # Use relative displacement from entry to avoid feeding raw absolute coords to the policy.
+            # Equivalent to training formula when robot and reference start at the same position.
+            anchor_disp_w = aligned_anchor_pos_w - self._ref_anchor_world_origin
+            robot_disp_w  = torso_pos_w - self._entry_torso_pos_w
+            anchor_pos_b  = (R_torso_w.T @ (anchor_disp_w - robot_disp_w)).astype(np.float32)
+        else:
+            # Simulation: torso_pos_w is accurate. Use absolute coords, matching training exactly.
+            anchor_pos_b = (R_torso_w.T @ (aligned_anchor_pos_w - torso_pos_w)).astype(np.float32)
 
         # ---- motion_anchor_ori_b (relative to torso orientation, in torso body frame) ----
         ref_anchor_quat_w = self.motion_body_quat[t, NPZ_ANCHOR_IDX].astype(np.float64)
@@ -313,9 +317,15 @@ class Score(FSMState):
         # ---- Ball and target in pelvis body frame (training uses root/pelvis, not torso) ----
         if self.use_body_frame_ball:
             # Real robot: ball_pos_b comes directly from DDS (already in pelvis frame).
-            # target is expressed relative to pelvis at entry, stored in self.target_pos_b_entry.
-            ball_pos_b   = np.clip(self.state_cmd.ball_pos_b,   -8.0, 8.0).astype(np.float32)
-            target_pos_b = np.clip(self.target_pos_b_entry,     -8.0, 8.0).astype(np.float32)
+            # Target direction is corrected each frame for robot yaw rotation since entry:
+            #   target_world ≈ R_entry_yaw @ target_pos_b_entry
+            #   target_pos_b  = R_current_yaw.T @ target_world
+            ball_pos_b = np.clip(self.state_cmd.ball_pos_b, -8.0, 8.0).astype(np.float32)
+            
+            pelvis_quat = self.state_cmd.pelvis_quat_w.astype(np.float64)
+            current_yaw_mat = _quat_to_matrix(_yaw_quat(pelvis_quat))
+            target_world = self._entry_yaw_mat @ self.target_pos_b_entry.astype(np.float64)
+            target_pos_b = np.clip(current_yaw_mat.T @ target_world, -8.0, 8.0).astype(np.float32)
         else:
             # Simulation: transform from world frame using pelvis pos/quat.
             robot_pelvis_pos_w = self.state_cmd.pelvis_pos_w.astype(np.float64)

@@ -425,43 +425,135 @@ MuJoCo 实时（机器人世界系）
 
 ### anchor_pos_b 的计算差异
 
-代码里用 `use_body_frame_ball` flag 分两条路径，物理含义和精度不同：
+这是仿真和真机差异最大的量。代码用 `use_body_frame_ball` flag 分两条路径。
 
-**仿真**（`use_body_frame_ball=false`，`torso_pos_w` 来自 MuJoCo，精确）：
+---
+
+#### 训练时的公式（Isaac Lab）
+
+训练代码（`/home/ydlu/workspace/Score`）计算：
+
+```python
+motion_anchor_pos_b = quat_apply_inverse(robot_torso_quat_w,
+                          ref_anchor_pos_w - robot_torso_pos_w)
+```
+
+等价于：
+
+```
+anchor_pos_b_train = R_torso_w.T @ (ref_anchor_pos_w[t] - robot_torso_pos_w[t])
+```
+
+含义：**参考 torso 在哪里，机器人 torso 在哪里，两者之差，用 torso body 系表达。**
+
+关键前提：训练时每次 episode reset，Isaac Lab 把机器人 torso 放在与参考动作 t=0 对齐的位置，
+因此 `anchor_pos_b[t=0] ≈ 0`，随后随运动偏差增大/减小。
+
+---
+
+#### 仿真部署（`use_body_frame_ball=false`）
+
 ```python
 anchor_pos_b = R_torso_w.T @ (aligned_anchor_pos_w - torso_pos_w)
+#                               ↑ NPZ + yaw对齐           ↑ MuJoCo d.xpos[torso_id]
 ```
-含义：参考 torso 的绝对世界坐标 − 机器人 torso 的绝对世界坐标，转到 torso body 系。
-**与训练公式完全一致。**
 
-**真机**（`use_body_frame_ball=true`，`torso_pos_w` 永远是零）：
+`torso_pos_w` 来自 MuJoCo，实时精确。**与训练公式完全一致。**
+
+---
+
+#### 真机部署（`use_body_frame_ball=true`）
+
+真机没有里程计，`torso_pos_w` 永远是 `[0, 0, 0]`。
+直接套训练公式会得到：
+
+```
+anchor_pos_b = R_torso_w.T @ (aligned_anchor_pos_w - [0,0,0])
+             = R_torso_w.T @ aligned_anchor_pos_w
+```
+
+`aligned_anchor_pos_w` 是参考动作在世界坐标系里的**绝对位置**，比如 `[1.5, 0, 0.85]`。
+Policy 会认为"参考 torso 在你东边 1.5m"，而实际上参考和你几乎在同一个地方——**信号完全错误**。
+
+**解决方案：改用相对位移**
+
 ```python
-anchor_disp_w = aligned_anchor_pos_w - self._ref_anchor_world_origin  # 参考从t=0走的位移
-robot_disp_w  = torso_pos_w - self._entry_torso_pos_w                 # 机器人从enter()走的位移（=0）
+# enter() 时记录两个基准（只算一次，之后固定）
+self._ref_anchor_world_origin = self._init_to_world @ motion_body_pos[0, NPZ_ANCHOR_IDX]
+self._entry_torso_pos_w       = state_cmd.torso_pos_w.copy()   # 真机上 = [0,0,0]
+
+# 每帧 _build_obs() 里
+anchor_disp_w = aligned_anchor_pos_w    - self._ref_anchor_world_origin  # 参考从t=0走的位移
+robot_disp_w  = torso_pos_w             - self._entry_torso_pos_w        # 机器人从enter()走的位移
 anchor_pos_b  = R_torso_w.T @ (anchor_disp_w - robot_disp_w)
 ```
-含义：参考 torso 的位移 − 机器人 torso 的位移，转到 torso body 系。
 
-#### 两个公式的关系
+真机代入（`torso_pos_w = _entry_torso_pos_w = [0,0,0]`）：
+
+```
+anchor_disp_w = aligned_anchor_pos_w[t] - aligned_anchor_pos_w[0]
+robot_disp_w  = 0
+anchor_pos_b  = R_torso_w.T @ (aligned_anchor_pos_w[t] - aligned_anchor_pos_w[0])
+```
+
+含义：**参考 torso 从起点走了多远，用当前 torso 朝向表达。**
+
+从 t=0 时 `anchor_pos_b = 0` 开始，随参考动作推进逐渐变化，不再有初始的巨大偏置。
+
+---
+
+#### 两公式的数学关系
+
+设：
+- `A[t] = aligned_anchor_pos_w[t]`（参考 torso 世界坐标，经 yaw 对齐）
+- `P[t] = torso_pos_w[t]`（机器人 torso 世界坐标）
+- `A0 = _ref_anchor_world_origin = A[0]`（参考起点）
+- `P0 = _entry_torso_pos_w = P[0]`（机器人入场时 torso 位置）
 
 展开真机公式：
+
 ```
-new = R_torso_w.T @ (aligned_pos[t] - torso_pos[t]) - R_torso_w.T @ (ref_origin - entry_torso_pos)
-    = 旧公式 - 常数偏移
+真机公式 = R_torso_w.T @ ((A[t] - A0) - (P[t] - P0))
+         = R_torso_w.T @ (A[t] - P[t]) - R_torso_w.T @ (A0 - P0)
+         =    训练公式    -         常数偏移
 ```
 
-偏移量 = `R_torso_w.T @ (_ref_anchor_world_origin - _entry_torso_pos_w)`
+**常数偏移** = `R_torso_w.T @ (A0 - P0)` = 参考起点与机器人入场位置之差，转到 torso body 系。
 
-**当 `_ref_anchor_world_origin ≈ _entry_torso_pos_w` 时，偏移为零，两公式等价。**
+注意：真机上 `P0 = [0,0,0]`，`A0 ≈ [0, 0, 0.85]`（NPZ 里 torso 站立高度），**两者不相等**。
+但相对位移公式并不要求它们相等，见下方分析。
 
-训练时 Isaac Lab 在每次 episode reset 时让机器人 torso 与参考动作 t=0 的 anchor 对齐，
-所以偏移 ≈ 0，两公式等价。仿真部署时 robot spawn 在原点附近，参考动作起点也在原点附近，偏移同样很小。
+| 场景 | 偏移 `A0 - P0` | 对公式的影响 |
+|------|--------------|------------|
+| 训练（Isaac Lab reset 时让 `A0 ≈ P0`） | ≈ 0 | 两公式等价 |
+| 仿真部署（`torso_pos_w` 来自 MuJoCo，精确） | 直接用训练公式，不存在此偏移问题 | — |
+| 真机（使用训练公式）| `A0 ≠ P0`，偏移 ≈ `[0,0,0.85]` | 第一帧 anchor_pos_b ≈ `[0, 0, 0.85]`，巨大错误 |
+| 真机（使用相对位移公式） | `A0 ≠ P0`，但 A0 和 P0 各自消掉自己 | t=0 时强制为 0，误差只来自里程计缺失 |
 
-#### 真机近似误差
+**为什么相对位移公式不需要 `A0 ≈ P0`？**
 
-真机上 `robot_disp_w = 0`（无里程计），所以机器人实际走的距离没有被减掉。
-如果机器人跟上了参考动作，两者位移接近，误差较小；如果落后了，误差会累积。
-根本解决方案是补上支撑腿里程计（stance-leg odometry），目前作为近似使用。
+代入 t=0：
+```
+anchor_pos_b[0] = R.T @ ((A[0] - A[0]) - (P[0] - P[0])) = R.T @ 0 = 0
+```
+
+A[0] 和 P[0] 各自与自身相减，无论它们是否相等，结果都是 0。
+公式只关心"**各自从自己的起点走了多远**"，不要求两个起点在同一位置。
+
+---
+
+#### 真机近似的剩余误差
+
+真机上 `robot_disp_w = 0`，机器人实际走的位移没有被减掉。
+理想的完整公式应该是：
+
+```
+anchor_pos_b = R_torso_w.T @ (anchor_disp_w - actual_robot_disp_w)
+```
+
+`actual_robot_disp_w` 需要支撑腿里程计（stance-leg odometry）估计。
+当前近似等价于假设机器人始终停在原点，误差随机器人行走距离增大。
+对于踢球这类持续时间 ~2s、前进距离 ~0.3m 的短动作，误差在可接受范围内。
 
 ### anchor_ori_b 的计算差异
 
